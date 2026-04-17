@@ -1,0 +1,185 @@
+{
+  "name": "03_AI_Engagement_AutoReply",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {"interval": [{"field": "minutes", "minutesInterval": 5}]}
+      },
+      "id": "c3a11111-1111-1111-1111-111111111111",
+      "name": "Every 5 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "sheetName": "={{$env.GSHEET_CAMPAIGNS_ID}}",
+        "filtersUI": {"values": [{"lookupColumn": "status", "lookupValue": "running"}]}
+      },
+      "id": "c3a22222-2222-2222-2222-222222222222",
+      "name": "Get Running Campaigns",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [420, 300],
+      "credentials": {"googleSheetsOAuth2Api": {"id": "GSHEETS_CRED", "name": "Google Sheets OAuth"}}
+    },
+    {
+      "parameters": {
+        "url": "=https://api.twitter.com/2/tweets/search/recent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "twitterOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "query", "value": "=conversation_id:{{$json[\"tweet_id\"]}} -is:retweet -from:{{$env.X_BOT_USER_ID}}"},
+            {"name": "tweet.fields", "value": "author_id,created_at,conversation_id,public_metrics"},
+            {"name": "expansions", "value": "author_id"},
+            {"name": "user.fields", "value": "username,name,description"},
+            {"name": "max_results", "value": "50"},
+            {"name": "start_time", "value": "={{$now.minus({minutes: 15}).toISO()}}"}
+          ]
+        }
+      },
+      "id": "c3a33333-3333-3333-3333-333333333333",
+      "name": "Fetch Recent Replies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 300],
+      "credentials": {"twitterOAuth2Api": {"id": "TWITTER_CRED", "name": "X/Twitter OAuth2"}}
+    },
+    {
+      "parameters": {
+        "functionCode": "const res = $json;\nconst users = (res.includes && res.includes.users) || [];\nconst umap = Object.fromEntries(users.map(u => [u.id, u]));\nconst campaign = $('Get Running Campaigns').item.json;\nconst out = [];\nfor (const t of (res.data || [])) {\n  const u = umap[t.author_id] || {};\n  out.push({ json: {\n    campaign_id: campaign.campaign_id,\n    parent_tweet_id: campaign.tweet_id,\n    reply_id: t.id,\n    author_id: t.author_id,\n    username: u.username || '',\n    name: u.name || '',\n    bio: u.description || '',\n    text: t.text,\n    created_at: t.created_at\n  }});\n}\nreturn out;"
+      },
+      "id": "c3a44444-4444-4444-4444-444444444444",
+      "name": "Flatten Replies",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [860, 300]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "sheetName": "={{$env.GSHEET_AUTOREPLIES_ID}}",
+        "filtersUI": {"values": [{"lookupColumn": "reply_id", "lookupValue": "={{$json[\"reply_id\"]}}"}]}
+      },
+      "id": "c3a55555-5555-5555-5555-555555555555",
+      "name": "Check Already Replied",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1080, 300],
+      "credentials": {"googleSheetsOAuth2Api": {"id": "GSHEETS_CRED", "name": "Google Sheets OAuth"}}
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {"leftValue": "={{$json[\"reply_id\"]}}", "rightValue": "", "operator": {"type": "string", "operation": "empty"}}
+          ]
+        }
+      },
+      "id": "c3a66666-6666-6666-6666-666666666666",
+      "name": "Is New?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1300, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "modelId": {"__rl": true, "mode": "list", "value": "claude-sonnet-4-6"},
+        "messages": {
+          "values": [
+            {
+              "role": "user",
+              "content": "=あなたは副業ノウハウを発信するXアカウントのコミュニティマネージャーです。キャンペーン参加者のリプに、自然で温かく、押し売り感のない返信を1つだけ日本語で生成してください。\n\n制約:\n- 120文字以内\n- 絵文字は最大2つ\n- 相手のプロフィールや文面に1箇所だけ軽く触れる\n- 「必ず当選」などの誤解を招く表現は禁止\n- 末尾に『プロフのリンクに無料ガイド置いてます✨』のような誘導を自然に1回だけ\n- ハッシュタグは付けない\n\n相手のユーザー名: @{{$json[\"username\"]}}\n相手の表示名: {{$json[\"name\"]}}\n相手のbio: {{$json[\"bio\"]}}\n相手の投稿: {{$json[\"text\"]}}\n\n返信本文のみを出力してください。"
+            }
+          ]
+        },
+        "options": {"maxTokensToSample": 300, "temperature": 0.8}
+      },
+      "id": "c3a77777-7777-7777-7777-777777777777",
+      "name": "Claude Generate Reply",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [1520, 220],
+      "credentials": {"anthropicApi": {"id": "ANTHROPIC_CRED", "name": "Anthropic API"}}
+    },
+    {
+      "parameters": {
+        "functionCode": "const reply = ($json.content && $json.content[0] && $json.content[0].text) || $json.text || '';\nconst clean = reply.trim().replace(/^[\"「]|[\"」]$/g, '').slice(0, 140);\nreturn [{ json: { ...$('Flatten Replies').item.json, generated_reply: clean } }];"
+      },
+      "id": "c3a88888-8888-8888-8888-888888888888",
+      "name": "Sanitize",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1740, 220]
+    },
+    {
+      "parameters": {
+        "resource": "tweet",
+        "text": "={{$json[\"generated_reply\"]}}",
+        "additionalFields": {
+          "inReplyToStatusId": "={{$json[\"reply_id\"]}}"
+        }
+      },
+      "id": "c3a99999-9999-9999-9999-999999999999",
+      "name": "Post Reply",
+      "type": "n8n-nodes-base.twitter",
+      "typeVersion": 2,
+      "position": [1960, 220],
+      "credentials": {"twitterOAuth2Api": {"id": "TWITTER_CRED", "name": "X/Twitter OAuth2"}}
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetName": "={{$env.GSHEET_AUTOREPLIES_ID}}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "campaign_id": "={{$json[\"campaign_id\"]}}",
+            "reply_id": "={{$json[\"reply_id\"]}}",
+            "author_id": "={{$json[\"author_id\"]}}",
+            "username": "={{$json[\"username\"]}}",
+            "original_text": "={{$json[\"text\"]}}",
+            "generated_reply": "={{$json[\"generated_reply\"]}}",
+            "posted_at": "={{$now.toISO()}}"
+          }
+        }
+      },
+      "id": "c3aaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "name": "Log AutoReply",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [2180, 220],
+      "credentials": {"googleSheetsOAuth2Api": {"id": "GSHEETS_CRED", "name": "Google Sheets OAuth"}}
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "c3abbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      "name": "Rate Limit Wait",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2400, 220]
+    }
+  ],
+  "connections": {
+    "Every 5 min": {"main": [[{"node": "Get Running Campaigns", "type": "main", "index": 0}]]},
+    "Get Running Campaigns": {"main": [[{"node": "Fetch Recent Replies", "type": "main", "index": 0}]]},
+    "Fetch Recent Replies": {"main": [[{"node": "Flatten Replies", "type": "main", "index": 0}]]},
+    "Flatten Replies": {"main": [[{"node": "Check Already Replied", "type": "main", "index": 0}]]},
+    "Check Already Replied": {"main": [[{"node": "Is New?", "type": "main", "index": 0}]]},
+    "Is New?": {"main": [[{"node": "Claude Generate Reply", "type": "main", "index": 0}], []]},
+    "Claude Generate Reply": {"main": [[{"node": "Sanitize", "type": "main", "index": 0}]]},
+    "Sanitize": {"main": [[{"node": "Post Reply", "type": "main", "index": 0}]]},
+    "Post Reply": {"main": [[{"node": "Log AutoReply", "type": "main", "index": 0}]]},
+    "Log AutoReply": {"main": [[{"node": "Rate Limit Wait", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"},
+  "tags": [{"name": "campaign"}, {"name": "ai"}, {"name": "engagement"}]
+}

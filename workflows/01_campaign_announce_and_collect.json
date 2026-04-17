@@ -1,0 +1,268 @@
+{
+  "name": "01_Campaign_Announce_and_Collect",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 19 * * *"
+            }
+          ]
+        }
+      },
+      "id": "c1a11111-1111-1111-1111-111111111111",
+      "name": "Daily 19:00 JST",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 200]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "sheetName": "={{$env.GSHEET_CAMPAIGNS_ID}}",
+        "options": {
+          "returnAllMatches": true
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "status",
+              "lookupValue": "queued"
+            }
+          ]
+        }
+      },
+      "id": "c1a22222-2222-2222-2222-222222222222",
+      "name": "Read Queued Campaign",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [420, 200],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GSHEETS_CRED",
+          "name": "Google Sheets OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {"caseSensitive": true, "typeValidation": "strict"},
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{$json[\"campaign_id\"]}}",
+              "rightValue": "",
+              "operator": {"type": "string", "operation": "notEmpty"}
+            }
+          ]
+        }
+      },
+      "id": "c1a33333-3333-3333-3333-333333333333",
+      "name": "Has Campaign?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [640, 200]
+    },
+    {
+      "parameters": {
+        "functionCode": "const row = $json;\nconst hashtag = row.hashtag || '#副業ノウハウプレゼント';\nconst prize = row.prize || '副業スタートガイドPDF';\nconst deadline = row.deadline || '明日23:59まで';\nconst text = `【${prize} プレゼント企画】\\n\\n参加方法\\n1) このアカウントをフォロー\\n2) この投稿をリポスト\\n3) ${hashtag} を付けてリプで「参加」と一言\\n\\n抽選で当選者にDMします！\\n締切：${deadline}`;\nreturn [{ json: { ...row, post_text: text } }];"
+      },
+      "id": "c1a44444-4444-4444-4444-444444444444",
+      "name": "Build Post Text",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [860, 120]
+    },
+    {
+      "parameters": {
+        "resource": "tweet",
+        "text": "={{$json[\"post_text\"]}}"
+      },
+      "id": "c1a55555-5555-5555-5555-555555555555",
+      "name": "Post Campaign Tweet",
+      "type": "n8n-nodes-base.twitter",
+      "typeVersion": 2,
+      "position": [1080, 120],
+      "credentials": {
+        "twitterOAuth2Api": {
+          "id": "TWITTER_CRED",
+          "name": "X/Twitter OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "sheetName": "={{$env.GSHEET_CAMPAIGNS_ID}}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "campaign_id": "={{$json[\"campaign_id\"]}}",
+            "status": "running",
+            "tweet_id": "={{$json[\"id\"]}}",
+            "posted_at": "={{$now.toISO()}}"
+          }
+        },
+        "options": {}
+      },
+      "id": "c1a66666-6666-6666-6666-666666666666",
+      "name": "Mark Campaign Running",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1300, 120],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GSHEETS_CRED",
+          "name": "Google Sheets OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 10
+            }
+          ]
+        }
+      },
+      "id": "c1b11111-1111-1111-1111-111111111111",
+      "name": "Every 10 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 520]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "sheetName": "={{$env.GSHEET_CAMPAIGNS_ID}}",
+        "filtersUI": {
+          "values": [
+            {"lookupColumn": "status", "lookupValue": "running"}
+          ]
+        }
+      },
+      "id": "c1b22222-2222-2222-2222-222222222222",
+      "name": "Get Running Campaigns",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [420, 520],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GSHEETS_CRED",
+          "name": "Google Sheets OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.twitter.com/2/tweets/search/recent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "twitterOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {"name": "query", "value": "=conversation_id:{{$json[\"tweet_id\"]}} -is:retweet"},
+            {"name": "tweet.fields", "value": "author_id,created_at,in_reply_to_user_id,conversation_id"},
+            {"name": "expansions", "value": "author_id"},
+            {"name": "user.fields", "value": "username,name"},
+            {"name": "max_results", "value": "100"}
+          ]
+        },
+        "options": {}
+      },
+      "id": "c1b33333-3333-3333-3333-333333333333",
+      "name": "Fetch Replies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 520],
+      "credentials": {
+        "twitterOAuth2Api": {
+          "id": "TWITTER_CRED",
+          "name": "X/Twitter OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const input = $json;\nconst users = (input.includes && input.includes.users) || [];\nconst userMap = Object.fromEntries(users.map(u => [u.id, u]));\nconst tweets = input.data || [];\nconst campaign = $('Get Running Campaigns').item.json;\nconst keyword = campaign.keyword || '参加';\nconst out = [];\nfor (const t of tweets) {\n  if (!t.text || !t.text.includes(keyword)) continue;\n  const u = userMap[t.author_id] || {};\n  out.push({ json: {\n    campaign_id: campaign.campaign_id,\n    tweet_id: t.id,\n    author_id: t.author_id,\n    username: u.username || '',\n    name: u.name || '',\n    text: t.text,\n    created_at: t.created_at\n  }});\n}\nreturn out;"
+      },
+      "id": "c1b44444-4444-4444-4444-444444444444",
+      "name": "Filter Valid Entries",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [860, 520]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "sheetName": "={{$env.GSHEET_APPLICANTS_ID}}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["tweet_id"],
+          "value": {
+            "campaign_id": "={{$json[\"campaign_id\"]}}",
+            "tweet_id": "={{$json[\"tweet_id\"]}}",
+            "author_id": "={{$json[\"author_id\"]}}",
+            "username": "={{$json[\"username\"]}}",
+            "name": "={{$json[\"name\"]}}",
+            "text": "={{$json[\"text\"]}}",
+            "created_at": "={{$json[\"created_at\"]}}",
+            "status": "entered"
+          }
+        },
+        "options": {}
+      },
+      "id": "c1b55555-5555-5555-5555-555555555555",
+      "name": "Upsert Applicant",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [1080, 520],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GSHEETS_CRED",
+          "name": "Google Sheets OAuth"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 19:00 JST": {
+      "main": [[{"node": "Read Queued Campaign", "type": "main", "index": 0}]]
+    },
+    "Read Queued Campaign": {
+      "main": [[{"node": "Has Campaign?", "type": "main", "index": 0}]]
+    },
+    "Has Campaign?": {
+      "main": [
+        [{"node": "Build Post Text", "type": "main", "index": 0}],
+        []
+      ]
+    },
+    "Build Post Text": {
+      "main": [[{"node": "Post Campaign Tweet", "type": "main", "index": 0}]]
+    },
+    "Post Campaign Tweet": {
+      "main": [[{"node": "Mark Campaign Running", "type": "main", "index": 0}]]
+    },
+    "Every 10 min": {
+      "main": [[{"node": "Get Running Campaigns", "type": "main", "index": 0}]]
+    },
+    "Get Running Campaigns": {
+      "main": [[{"node": "Fetch Replies", "type": "main", "index": 0}]]
+    },
+    "Fetch Replies": {
+      "main": [[{"node": "Filter Valid Entries", "type": "main", "index": 0}]]
+    },
+    "Filter Valid Entries": {
+      "main": [[{"node": "Upsert Applicant", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {"executionOrder": "v1"},
+  "tags": [{"name": "campaign"}, {"name": "x-twitter"}]
+}
