@@ -1,5 +1,5 @@
 -- n8n自動化フロー用のSupabaseスキーマ
--- 「リプライ → DM → 販売」を支える2テーブル
+-- 「リプライ → DM → 販売」を支えるテーブル群
 
 create table if not exists processed_replies (
   id bigserial primary key,
@@ -30,3 +30,15 @@ create table if not exists leads (
 
 create index if not exists idx_leads_author_id on leads (author_id);
 create index if not exists idx_leads_stage_created on leads (stage, created_at);
+
+create table if not exists error_log (
+  id bigserial primary key,
+  workflow_name text,
+  node_name text,
+  message text,
+  stack text,
+  execution_url text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_error_log_created on error_log (created_at desc);

@@ -1,0 +1,72 @@
+{
+  "name": "Error Handler (Subworkflow)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "error-trigger",
+      "name": "エラートリガー",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [200, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const err = $input.item.json;\nconst wf = err.workflow?.name || 'unknown';\nconst node = err.execution?.lastNodeExecuted || 'unknown';\nconst msg = err.execution?.error?.message || 'no message';\nconst stack = (err.execution?.error?.stack || '').slice(0, 500);\nconst url = err.execution?.url || '';\nreturn [{ json: { wf, node, msg, stack, url } }];"
+      },
+      "id": "format",
+      "name": "エラー整形",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 400]
+    },
+    {
+      "parameters": {
+        "channel": "#ops-alerts",
+        "text": "=🚨 *n8n エラー*\n*Workflow:* {{ $json.wf }}\n*Node:* {{ $json.node }}\n*Message:* {{ $json.msg }}\n{{ $json.url ? '<' + $json.url + '|実行ログを開く>' : '' }}\n```{{ $json.stack }}```"
+      },
+      "id": "slack-alert",
+      "name": "Slackへ通報",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [640, 400]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "tableId": "error_log",
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "workflow_name", "fieldValue": "={{ $json.wf }}" },
+            { "fieldId": "node_name", "fieldValue": "={{ $json.node }}" },
+            { "fieldId": "message", "fieldValue": "={{ $json.msg }}" },
+            { "fieldId": "stack", "fieldValue": "={{ $json.stack }}" },
+            { "fieldId": "execution_url", "fieldValue": "={{ $json.url }}" },
+            { "fieldId": "created_at", "fieldValue": "={{ $now.toISO() }}" }
+          ]
+        }
+      },
+      "id": "log-to-db",
+      "name": "error_logに保存",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [640, 580]
+    }
+  ],
+  "connections": {
+    "エラートリガー": {
+      "main": [[{ "node": "エラー整形", "type": "main", "index": 0 }]]
+    },
+    "エラー整形": {
+      "main": [
+        [
+          { "node": "Slackへ通報", "type": "main", "index": 0 },
+          { "node": "error_logに保存", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [{ "name": "ops" }]
+}

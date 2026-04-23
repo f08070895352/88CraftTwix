@@ -90,6 +90,24 @@ n8n 側で有効化された `/webhook/stripe-checkout-completed` の URL を St
 Checkout Session 作成時に `client_reference_id` に X の `author_id` を必ず入れること
 （これでリードとの紐付けが行われます）。
 
+## 同梱ワークフロー
+
+| ファイル | 役割 |
+|---|---|
+| `workflows/reply-to-dm-to-sales.json` | メインフロー（リプ取得→AI判定→自動リプ→DM→保存→フォロー） |
+| `workflows/stripe-checkout-session-creator.json` | `GET /checkout?ref=<author_id>` を受けて Stripe Checkout Session を作り 302 リダイレクト |
+| `workflows/error-handler.json` | Error Trigger → Slack 通報 + `error_log` テーブルへ保存（各ワークフローの **Settings → Error Workflow** でこれを指定） |
+| `workflows/daily-kpi-report.json` | 毎朝9時に直近24hの DM数 / CVR / 売上 / 平均リードスコアを Slack 投稿 |
+
+## テスト素材
+
+- `fixtures/sample-mention.json` — X API `/mentions` レスポンスの模擬（3件：質問 / スパム / 見込み客）
+- `fixtures/sample-stripe-webhook.json` — `checkout.session.completed` の模擬ペイロード
+- `config/product-context.json` — AIプロンプトに差し込む商品情報 & トーン設定
+
+`AI分類・返信生成` ノードの system プロンプト末尾に `config/product-context.json` の内容を差し込むことで、
+商品名・価格・FAQを踏まえた返信になります（Set ノード経由で `{{ $json.product_context }}` として渡す設計）。
+
 ## カスタマイズポイント
 
 - **lead_score のしきい値**: `見込み客判定` ノードで `>= 40` を変更

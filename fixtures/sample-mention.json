@@ -1,0 +1,40 @@
+{
+  "data": [
+    {
+      "id": "1780000000000000001",
+      "author_id": "9999999991",
+      "created_at": "2026-04-23T01:23:45.000Z",
+      "conversation_id": "1780000000000000001",
+      "text": "これ気になります！値段いくらですか？",
+      "referenced_tweets": [
+        { "type": "replied_to", "id": "1770000000000000000" }
+      ]
+    },
+    {
+      "id": "1780000000000000002",
+      "author_id": "9999999992",
+      "created_at": "2026-04-23T01:24:00.000Z",
+      "conversation_id": "1780000000000000002",
+      "text": "フォローはこちらからお願いします👉 http://spam.example",
+      "referenced_tweets": []
+    },
+    {
+      "id": "1780000000000000003",
+      "author_id": "9999999993",
+      "created_at": "2026-04-23T01:25:15.000Z",
+      "conversation_id": "1780000000000000003",
+      "text": "実際に使ってみた感想シェアしたいのですがDM可能ですか？",
+      "referenced_tweets": []
+    }
+  ],
+  "includes": {
+    "users": [
+      { "id": "9999999991", "username": "curious_user", "public_metrics": { "followers_count": 420 }, "verified": false },
+      { "id": "9999999992", "username": "spam_bot", "public_metrics": { "followers_count": 3 }, "verified": false },
+      { "id": "9999999993", "username": "power_user", "public_metrics": { "followers_count": 12000 }, "verified": true }
+    ]
+  },
+  "meta": {
+    "result_count": 3
+  }
+}

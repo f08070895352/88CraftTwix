@@ -1,0 +1,84 @@
+{
+  "name": "Stripe Checkout Session Creator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "checkout",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": false
+        }
+      },
+      "id": "checkout-webhook",
+      "name": "GET /checkout",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ref = $input.item.json.query.ref || '';\nconst src = $input.item.json.query.utm_source || 'x';\nif (!ref) {\n  throw new Error('ref (author_id) is required');\n}\nreturn [{ json: { author_id: ref, utm_source: src } }];"
+      },
+      "id": "parse-query",
+      "name": "クエリ検証",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 400]
+    },
+    {
+      "parameters": {
+        "url": "https://api.stripe.com/v1/checkout/sessions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "stripeApi",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "mode", "value": "payment" },
+            { "name": "success_url", "value": "={{ $env.SUCCESS_URL }}" },
+            { "name": "cancel_url", "value": "={{ $env.CANCEL_URL }}" },
+            { "name": "client_reference_id", "value": "={{ $json.author_id }}" },
+            { "name": "line_items[0][price]", "value": "={{ $env.STRIPE_PRICE_ID }}" },
+            { "name": "line_items[0][quantity]", "value": "1" },
+            { "name": "metadata[utm_source]", "value": "={{ $json.utm_source }}" },
+            { "name": "allow_promotion_codes", "value": "true" },
+            { "name": "discounts[0][coupon]", "value": "={{ $env.STRIPE_COUPON_ID }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "create-session",
+      "name": "Stripe Session作成",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "redirect",
+        "redirectURL": "={{ $json.url }}"
+      },
+      "id": "redirect",
+      "name": "Checkout URLへ302",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [860, 400]
+    }
+  ],
+  "connections": {
+    "GET /checkout": {
+      "main": [[{ "node": "クエリ検証", "type": "main", "index": 0 }]]
+    },
+    "クエリ検証": {
+      "main": [[{ "node": "Stripe Session作成", "type": "main", "index": 0 }]]
+    },
+    "Stripe Session作成": {
+      "main": [[{ "node": "Checkout URLへ302", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [{ "name": "sales" }, { "name": "stripe" }]
+}

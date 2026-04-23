@@ -1,0 +1,22 @@
+{
+  "id": "evt_test_123",
+  "object": "event",
+  "type": "checkout.session.completed",
+  "created": 1745371200,
+  "data": {
+    "object": {
+      "id": "cs_test_abc123",
+      "object": "checkout.session",
+      "mode": "payment",
+      "status": "complete",
+      "payment_status": "paid",
+      "amount_total": 9800,
+      "currency": "jpy",
+      "client_reference_id": "9999999991",
+      "customer_email": "buyer@example.com",
+      "metadata": {
+        "utm_source": "x_dm"
+      }
+    }
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "name": "Daily KPI Report",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "cronExpression", "expression": "0 9 * * *" }
+          ]
+        }
+      },
+      "id": "daily-9am",
+      "name": "毎朝9時",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 400]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with window24 as (\n  select * from leads where created_at >= now() - interval '1 day'\n)\nselect\n  (select count(*) from window24) as dm_sent,\n  (select count(*) from window24 where stage = 'purchased') as purchased,\n  coalesce((select sum(amount) from window24 where stage = 'purchased'), 0) as revenue,\n  coalesce(avg(lead_score), 0) as avg_score\nfrom window24;"
+      },
+      "id": "query-kpis",
+      "name": "KPI集計 (Postgres)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [420, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.item.json;\nconst sent = Number(r.dm_sent) || 0;\nconst bought = Number(r.purchased) || 0;\nconst cvr = sent > 0 ? ((bought / sent) * 100).toFixed(1) : '0.0';\nreturn [{ json: {\n  dm_sent: sent,\n  purchased: bought,\n  revenue: Number(r.revenue) || 0,\n  avg_score: Number(r.avg_score).toFixed(1),\n  cvr,\n}}];"
+      },
+      "id": "format-kpis",
+      "name": "整形",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 400]
+    },
+    {
+      "parameters": {
+        "channel": "#sales-daily",
+        "text": "=📊 *24h サマリー*\n• DM送信: *{{ $json.dm_sent }}* 件\n• 購入: *{{ $json.purchased }}* 件\n• CVR: *{{ $json.cvr }}%*\n• 売上: *¥{{ $json.revenue.toLocaleString() }}*\n• 平均リードスコア: {{ $json.avg_score }}"
+      },
+      "id": "post-slack",
+      "name": "Slackへ投稿",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [860, 400]
+    }
+  ],
+  "connections": {
+    "毎朝9時": {
+      "main": [[{ "node": "KPI集計 (Postgres)", "type": "main", "index": 0 }]]
+    },
+    "KPI集計 (Postgres)": {
+      "main": [[{ "node": "整形", "type": "main", "index": 0 }]]
+    },
+    "整形": {
+      "main": [[{ "node": "Slackへ投稿", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [{ "name": "reporting" }]
+}
