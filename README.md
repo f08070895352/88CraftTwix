@@ -109,6 +109,14 @@ Checkout Session 作成時に `client_reference_id` に X の `author_id` を必
 `AI分類・返信生成` ノードの system プロンプト末尾に `config/product-context.json` の内容を差し込むことで、
 商品名・価格・FAQを踏まえた返信になります（Set ノード経由で `{{ $json.product_context }}` として渡す設計）。
 
+## 堅牢化済みの挙動
+
+- **AI返信は商品コンテキストに基づく**: `商品コンテキスト` Setノードに `config/product-context.json` の内容を埋め込んであります。UI で直接編集 OK。AI は名前・価格・FAQをここから引用し、創作しないように指示されています。
+- **DM送信失敗を自動検知**: `DM送信（特典LP付き）` は 3回リトライ → 最終失敗時は `leads.stage=dm_failed` として保存し、`#ops-alerts` へ Slack 通報。ブロック/受信拒否ユーザでワークフロー全体が止まりません。
+- **Stripe Webhook の署名検証**: `Stripe署名検証` Code ノードが `Stripe-Signature` ヘッダを HMAC-SHA256 で検証 + 5分以内のリプレイ対策。検証失敗時は throw してErrorWorkflowへ。
+  - セルフホストn8nでは `NODE_FUNCTION_ALLOW_BUILTIN=crypto` を環境変数に設定してください（Docker: `-e NODE_FUNCTION_ALLOW_BUILTIN=crypto`）。
+  - `.env` に `STRIPE_WEBHOOK_SECRET=whsec_...` を追加。
+
 ## カスタマイズポイント
 
 - **lead_score のしきい値**: `見込み客判定` ノードで `>= 40` を変更
