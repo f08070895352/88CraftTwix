@@ -1,0 +1,127 @@
+{
+  "name": "B: Thread Poster",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "post-thread",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "trigger",
+      "name": "POST /post-thread",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 400],
+      "notes": "body: { campaign_id: string, tweets: string[] }\nスレッド型ストーリー / ノウハウ連投 / ビフォーアフター すべてこれで配信"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "body.tweets",
+        "include": "allOtherFields",
+        "options": {}
+      },
+      "id": "split",
+      "name": "ツイートを分割",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [420, 400]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "batch",
+      "name": "順次処理ループ",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [640, 400]
+    },
+    {
+      "parameters": {
+        "url": "https://api.twitter.com/2/tweets",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "twitterOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": {{ JSON.stringify($json) }}\n  {{ $('順次処理ループ').context.lastTweetId ? (', \"reply\": { \"in_reply_to_tweet_id\": ' + JSON.stringify($('順次処理ループ').context.lastTweetId) + ' }') : '' }}\n}",
+        "options": {}
+      },
+      "id": "post-tweet",
+      "name": "ツイート投稿",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 400],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000
+    },
+    {
+      "parameters": {
+        "jsCode": "// 次の投稿のin_reply_to用にIDを記憶\n$('順次処理ループ').context.lastTweetId = $input.item.json.data.id;\nif (!$('順次処理ループ').context.firstTweetId) {\n  $('順次処理ループ').context.firstTweetId = $input.item.json.data.id;\n}\nreturn [{ json: $input.item.json }];"
+      },
+      "id": "remember-id",
+      "name": "IDを記憶",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1080, 400]
+    },
+    {
+      "parameters": {
+        "amount": 3,
+        "unit": "seconds"
+      },
+      "id": "wait",
+      "name": "3秒待機 (連投制限回避)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1300, 400]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "tableId": "campaign_events",
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "campaign_id", "fieldValue": "={{ $('POST /post-thread').item.json.body.campaign_id }}" },
+            { "fieldId": "event", "fieldValue": "thread_posted" },
+            { "fieldId": "meta", "fieldValue": "={ \"first_tweet_id\": \"{{ $('順次処理ループ').context.firstTweetId }}\", \"count\": {{ $('POST /post-thread').item.json.body.tweets.length }} }" }
+          ]
+        }
+      },
+      "id": "log-event",
+      "name": "投稿ログ",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1520, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"thread_root_id\": \"{{ $('順次処理ループ').context.firstTweetId }}\" }"
+      },
+      "id": "respond",
+      "name": "root ID返却",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1740, 400]
+    }
+  ],
+  "connections": {
+    "POST /post-thread": { "main": [[{ "node": "ツイートを分割", "type": "main", "index": 0 }]] },
+    "ツイートを分割": { "main": [[{ "node": "順次処理ループ", "type": "main", "index": 0 }]] },
+    "順次処理ループ": {
+      "main": [
+        [{ "node": "ツイート投稿", "type": "main", "index": 0 }],
+        [{ "node": "投稿ログ", "type": "main", "index": 0 }]
+      ]
+    },
+    "ツイート投稿": { "main": [[{ "node": "IDを記憶", "type": "main", "index": 0 }]] },
+    "IDを記憶": { "main": [[{ "node": "3秒待機 (連投制限回避)", "type": "main", "index": 0 }]] },
+    "3秒待機 (連投制限回避)": { "main": [[{ "node": "順次処理ループ", "type": "main", "index": 0 }]] },
+    "投稿ログ": { "main": [[{ "node": "root ID返却", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "campaign" }, { "name": "B-education" }]
+}

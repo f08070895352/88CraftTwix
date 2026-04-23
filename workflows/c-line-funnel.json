@@ -1,0 +1,107 @@
+{
+  "name": "C: LINE Funnel Bridge",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "line-webhook",
+        "responseMode": "responseNode",
+        "options": { "rawBody": true }
+      },
+      "id": "line-webhook",
+      "name": "LINE Webhook受信",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 400],
+      "notes": "Messaging API の Webhook URL に登録。follow / message イベントを受ける"
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\nconst raw = $input.item.json.rawBody || JSON.stringify($input.item.json.body || {});\nconst sig = $input.item.json.headers?.['x-line-signature'];\nconst secret = $env.LINE_CHANNEL_SECRET;\nif (!secret) throw new Error('LINE_CHANNEL_SECRET missing');\nconst expected = crypto.createHmac('sha256', secret).update(raw).digest('base64');\nif (expected !== sig) throw new Error('LINE signature mismatch');\nconst parsed = JSON.parse(raw);\nreturn (parsed.events || []).map(e => ({ json: e }));"
+      },
+      "id": "verify-line",
+      "name": "LINE署名検証",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.type }}",
+              "rightValue": "follow",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ]
+        }
+      },
+      "id": "is-follow",
+      "name": "follow イベントか",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [640, 400]
+    },
+    {
+      "parameters": {
+        "url": "https://api.line.me/v2/bot/message/reply",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"replyToken\": {{ JSON.stringify($json.replyToken) }},\n  \"messages\": [{\n    \"type\": \"text\",\n    \"text\": \"ご登録ありがとうございます🎉\\n\\n最新情報や限定特典をお届けします！\\n\\nご質問はこのトークへどうぞ。\"\n  }]\n}"
+      },
+      "id": "send-welcome",
+      "name": "LINEウェルカム返信",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 320]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "tableId": "campaign_conversions",
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "campaign_id", "fieldValue": "={{ $env.LINE_DEFAULT_CAMPAIGN_ID }}" },
+            { "fieldId": "cv_type", "fieldValue": "line_add" },
+            { "fieldId": "external_id", "fieldValue": "={{ $json.source?.userId }}" }
+          ]
+        }
+      },
+      "id": "log-cv",
+      "name": "LINE追加をCV記録",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1080, 320]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "ok"
+      },
+      "id": "respond",
+      "name": "webhook応答",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [640, 600]
+    }
+  ],
+  "connections": {
+    "LINE Webhook受信": { "main": [[
+      { "node": "LINE署名検証", "type": "main", "index": 0 },
+      { "node": "webhook応答", "type": "main", "index": 0 }
+    ]] },
+    "LINE署名検証": { "main": [[{ "node": "follow イベントか", "type": "main", "index": 0 }]] },
+    "follow イベントか": {
+      "main": [
+        [{ "node": "LINEウェルカム返信", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "LINEウェルカム返信": { "main": [[{ "node": "LINE追加をCV記録", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "campaign" }, { "name": "C-sales" }, { "name": "line" }]
+}

@@ -1,0 +1,143 @@
+{
+  "name": "D: Poll Creator + Tracker",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "create-poll",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "trigger",
+      "name": "POST /create-poll",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 400],
+      "notes": "body: { campaign_id, text, options: string[4], duration_minutes: 1440 }"
+    },
+    {
+      "parameters": {
+        "url": "https://api.twitter.com/2/tweets",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "twitterOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": {{ JSON.stringify($json.body.text) }},\n  \"poll\": {\n    \"options\": {{ JSON.stringify($json.body.options) }},\n    \"duration_minutes\": {{ $json.body.duration_minutes || 1440 }}\n  }\n}"
+      },
+      "id": "post-poll",
+      "name": "Poll投稿",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 400]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "campaigns",
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            { "keyName": "id", "condition": "eq", "keyValue": "={{ $('POST /create-poll').item.json.body.campaign_id }}" }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "target_tweet_id", "fieldValue": "={{ $json.data.id }}" },
+            { "fieldId": "starts_at", "fieldValue": "={{ $now.toISO() }}" },
+            { "fieldId": "ends_at", "fieldValue": "={{ $now.plus({minutes: $('POST /create-poll').item.json.body.duration_minutes || 1440}).toISO() }}" }
+          ]
+        }
+      },
+      "id": "save-tweet-id",
+      "name": "tweet_id保存",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [640, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"tweet_id\": \"{{ $('Poll投稿').item.json.data.id }}\" }"
+      },
+      "id": "respond",
+      "name": "結果返却",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [860, 400]
+    },
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "hours", "hoursInterval": 1 }] }
+      },
+      "id": "cron-1h",
+      "name": "1時間毎にPoll結果取得",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 700]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "campaigns",
+        "returnAll": true,
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            { "keyName": "category", "condition": "eq", "keyValue": "D" },
+            { "keyName": "type", "condition": "eq", "keyValue": "poll" },
+            { "keyName": "status", "condition": "eq", "keyValue": "active" }
+          ]
+        }
+      },
+      "id": "get-polls",
+      "name": "アクティブなPoll取得",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [420, 700]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.twitter.com/2/tweets/{{ $json.target_tweet_id }}?expansions=attachments.poll_ids&poll.fields=options,voting_status,end_datetime,duration_minutes&tweet.fields=public_metrics",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "twitterOAuth2Api",
+        "options": {}
+      },
+      "id": "fetch-result",
+      "name": "Poll結果取得",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 700]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "tableId": "campaign_events",
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "campaign_id", "fieldValue": "={{ $('アクティブなPoll取得').item.json.id }}" },
+            { "fieldId": "event", "fieldValue": "poll_snapshot" },
+            { "fieldId": "value", "fieldValue": "={{ ($json.includes?.polls?.[0]?.options || []).reduce((s, o) => s + (o.votes || 0), 0) }}" },
+            { "fieldId": "meta", "fieldValue": "={{ JSON.stringify({ options: $json.includes?.polls?.[0]?.options, metrics: $json.data?.public_metrics }) }}" }
+          ]
+        }
+      },
+      "id": "log-snapshot",
+      "name": "スナップショット保存",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [860, 700]
+    }
+  ],
+  "connections": {
+    "POST /create-poll": { "main": [[{ "node": "Poll投稿", "type": "main", "index": 0 }]] },
+    "Poll投稿": { "main": [[{ "node": "tweet_id保存", "type": "main", "index": 0 }]] },
+    "tweet_id保存": { "main": [[{ "node": "結果返却", "type": "main", "index": 0 }]] },
+    "1時間毎にPoll結果取得": { "main": [[{ "node": "アクティブなPoll取得", "type": "main", "index": 0 }]] },
+    "アクティブなPoll取得": { "main": [[{ "node": "Poll結果取得", "type": "main", "index": 0 }]] },
+    "Poll結果取得": { "main": [[{ "node": "スナップショット保存", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "campaign" }, { "name": "D-engagement" }]
+}

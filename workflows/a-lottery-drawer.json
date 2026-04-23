@@ -1,0 +1,88 @@
+{
+  "name": "A: Lottery Drawer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "campaign-draw",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "trigger",
+      "name": "手動トリガ POST /campaign-draw",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 400],
+      "notes": "body: { campaign_id: string, winners: number, prize_dm: string }"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with pool as (\n  select e.*\n  from campaign_entries e\n  join campaigns c on c.id = e.campaign_id\n  where e.campaign_id = $1 and c.status = 'active'\n)\nselect * from pool order by random() limit $2",
+        "options": {
+          "queryReplacement": "={{ $json.body.campaign_id }},{{ $json.body.winners || 1 }}"
+        }
+      },
+      "id": "draw",
+      "name": "ランダム抽選",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [420, 400]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.twitter.com/2/dm_conversations/with/{{ $json.author_id }}/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "twitterOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": {{ JSON.stringify($('手動トリガ POST /campaign-draw').item.json.body.prize_dm || '🎉 ご当選おめでとうございます！詳細を追ってお送りします。') }}\n}"
+      },
+      "id": "notify-winner",
+      "name": "当選者へDM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 400],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "tableId": "campaign_events",
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "campaign_id", "fieldValue": "={{ $('手動トリガ POST /campaign-draw').item.json.body.campaign_id }}" },
+            { "fieldId": "event", "fieldValue": "winner_notified" },
+            { "fieldId": "actor_id", "fieldValue": "={{ $('ランダム抽選').item.json.author_id }}" }
+          ]
+        }
+      },
+      "id": "log-event",
+      "name": "イベント記録",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [860, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"winners\": {{ $('ランダム抽選').all().length }}, \"ids\": {{ JSON.stringify($('ランダム抽選').all().map(i => i.json.author_id)) }} }"
+      },
+      "id": "respond",
+      "name": "結果返却",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1080, 400]
+    }
+  ],
+  "connections": {
+    "手動トリガ POST /campaign-draw": { "main": [[{ "node": "ランダム抽選", "type": "main", "index": 0 }]] },
+    "ランダム抽選": { "main": [[{ "node": "当選者へDM", "type": "main", "index": 0 }]] },
+    "当選者へDM": { "main": [[{ "node": "イベント記録", "type": "main", "index": 0 }]] },
+    "イベント記録": { "main": [[{ "node": "結果返却", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "campaign" }, { "name": "A-follower" }]
+}

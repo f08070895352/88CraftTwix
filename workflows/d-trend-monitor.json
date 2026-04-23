@@ -1,0 +1,116 @@
+{
+  "name": "D: Trend Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "hours", "hoursInterval": 2 }] }
+      },
+      "id": "cron-2h",
+      "name": "2時間毎",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 400]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.twitter.com/2/trends/by/woeid/{{ $env.X_TREND_WOEID }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "twitterOAuth2Api",
+        "options": {}
+      },
+      "id": "fetch-trends",
+      "name": "トレンド取得",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 400],
+      "onError": "continueRegularOutput",
+      "notes": "Pro tier以上。WOEID 23424856 = 日本。Basicで404ならX公式の無料トレンドTweetをqueryする形に差し替え"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "options": {}
+      },
+      "id": "split",
+      "name": "各トレンド",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [640, 400]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "modelId": { "value": "gpt-4o-mini" },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "=あなたは SNS運用担当者です。自社事業は「{{ $env.BUSINESS_ONE_LINER || '（ここに事業一文）' }}」。\n与えられたX トレンドワードが、自社ビジネスに絡めて投稿したら自然か判定し JSON で返却:\n{\n  \"relevant\": true|false,\n  \"angle\": \"絡める角度の一文\",\n  \"draft_tweet\": \"240字以内のドラフト\",\n  \"risk\": \"low|medium|high\"\n}\n炎上リスクが高いワード(政治/災害/訃報)は relevant=false に。"
+            },
+            {
+              "role": "user",
+              "content": "=トレンド: {{ $json.trend_name || $json.name }}\nボリューム: {{ $json.tweet_count || '' }}"
+            }
+          ]
+        },
+        "jsonOutput": true,
+        "options": { "temperature": 0.7 }
+      },
+      "id": "ai-eval",
+      "name": "便乗可否を判定",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.6,
+      "position": [860, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.message.content.relevant }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            },
+            {
+              "leftValue": "={{ $json.message.content.risk }}",
+              "rightValue": "high",
+              "operator": { "type": "string", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "is-safe",
+      "name": "relevant & not high-risk",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1080, 400]
+    },
+    {
+      "parameters": {
+        "channel": "#content-ideas",
+        "text": "=🔥 *トレンド便乗チャンス* (risk: {{ $json.message.content.risk }})\n*トレンド:* {{ $('各トレンド').item.json.trend_name || $('各トレンド').item.json.name }}\n*角度:* {{ $json.message.content.angle }}\n\n```{{ $json.message.content.draft_tweet }}```\n\n(内容確認してOKなら手動で投稿)"
+      },
+      "id": "slack",
+      "name": "Slackへドラフト送信",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1300, 400]
+    }
+  ],
+  "connections": {
+    "2時間毎": { "main": [[{ "node": "トレンド取得", "type": "main", "index": 0 }]] },
+    "トレンド取得": { "main": [[{ "node": "各トレンド", "type": "main", "index": 0 }]] },
+    "各トレンド": { "main": [[{ "node": "便乗可否を判定", "type": "main", "index": 0 }]] },
+    "便乗可否を判定": { "main": [[{ "node": "relevant & not high-risk", "type": "main", "index": 0 }]] },
+    "relevant & not high-risk": {
+      "main": [
+        [{ "node": "Slackへドラフト送信", "type": "main", "index": 0 }],
+        []
+      ]
+    }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "campaign" }, { "name": "D-engagement" }]
+}

@@ -1,0 +1,125 @@
+{
+  "name": "A: Campaign Entry Collector",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "minutes", "minutesInterval": 10 }] }
+      },
+      "id": "cron-10m",
+      "name": "10分毎",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 400],
+      "parameters-notes": ""
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "campaigns",
+        "returnAll": true,
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            { "keyName": "category", "condition": "eq", "keyValue": "A" },
+            { "keyName": "status", "condition": "eq", "keyValue": "active" }
+          ]
+        }
+      },
+      "id": "get-active",
+      "name": "アクティブなAキャンペーン取得",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [420, 400]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.twitter.com/2/tweets/{{ $json.target_tweet_id }}/retweeted_by",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "twitterOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "max_results", "value": "100" },
+            { "name": "user.fields", "value": "username,public_metrics,protected" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fetch-rters",
+      "name": "RT者取得",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 300],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.twitter.com/2/tweets/{{ $json.target_tweet_id }}/quote_tweets",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "twitterOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "max_results", "value": "100" },
+            { "name": "expansions", "value": "author_id" },
+            { "name": "user.fields", "value": "username,public_metrics,protected" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fetch-quotes",
+      "name": "引用RT者取得",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 500],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// RT者・引用RT者・リプ者 (既存のmentions経由) を統合して entries として emit\nconst campaign = $('アクティブなAキャンペーン取得').item.json;\nconst rts = $('RT者取得').item.json?.data || [];\nconst quotes = $('引用RT者取得').item.json?.includes?.users || [];\nconst out = [];\nfor (const u of rts) {\n  out.push({ campaign_id: campaign.id, author_id: u.id, username: u.username, source_type: 'rt', source_tweet_id: campaign.target_tweet_id });\n}\nfor (const u of quotes) {\n  out.push({ campaign_id: campaign.id, author_id: u.id, username: u.username, source_type: 'quote', source_tweet_id: campaign.target_tweet_id });\n}\nreturn out.map(json => ({ json }));"
+      },
+      "id": "normalize",
+      "name": "エントリー正規化",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [860, 400]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "tableId": "campaign_entries",
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "campaign_id", "fieldValue": "={{ $json.campaign_id }}" },
+            { "fieldId": "author_id", "fieldValue": "={{ $json.author_id }}" },
+            { "fieldId": "username", "fieldValue": "={{ $json.username }}" },
+            { "fieldId": "source_type", "fieldValue": "={{ $json.source_type }}" },
+            { "fieldId": "source_tweet_id", "fieldValue": "={{ $json.source_tweet_id }}" }
+          ]
+        }
+      },
+      "id": "insert-entry",
+      "name": "エントリー保存 (UNIQUEで重複無視)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1080, 400],
+      "onError": "continueRegularOutput",
+      "notes": "UNIQUE(campaign_id, author_id, source_type) が効くので、重複は23505で弾かれる。continueOnFailで次へ。"
+    }
+  ],
+  "connections": {
+    "10分毎": { "main": [[{ "node": "アクティブなAキャンペーン取得", "type": "main", "index": 0 }]] },
+    "アクティブなAキャンペーン取得": {
+      "main": [[
+        { "node": "RT者取得", "type": "main", "index": 0 },
+        { "node": "引用RT者取得", "type": "main", "index": 0 }
+      ]]
+    },
+    "RT者取得": { "main": [[{ "node": "エントリー正規化", "type": "main", "index": 0 }]] },
+    "引用RT者取得": { "main": [[{ "node": "エントリー正規化", "type": "main", "index": 0 }]] },
+    "エントリー正規化": { "main": [[{ "node": "エントリー保存 (UNIQUEで重複無視)", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "campaign" }, { "name": "A-follower" }]
+}

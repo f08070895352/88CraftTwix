@@ -1,0 +1,150 @@
+{
+  "name": "B: Lead Magnet Deliverer",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "minutes", "minutesInterval": 5 }] }
+      },
+      "id": "cron-5m",
+      "name": "5分毎",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 400]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "campaigns",
+        "returnAll": true,
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            { "keyName": "category", "condition": "eq", "keyValue": "B" },
+            { "keyName": "type", "condition": "eq", "keyValue": "lead_magnet" },
+            { "keyName": "status", "condition": "eq", "keyValue": "active" }
+          ]
+        }
+      },
+      "id": "get-campaigns",
+      "name": "無料特典キャンペーン取得",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [420, 400]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.twitter.com/2/tweets/search/recent?query={{ encodeURIComponent('(' + ($json.config.trigger_keyword || '欲しい') + ' OR ' + ($json.config.trigger_keyword_en || 'want') + ') -is:retweet conversation_id:' + $json.target_tweet_id) }}&tweet.fields=author_id,created_at",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "twitterOAuth2Api",
+        "options": {}
+      },
+      "id": "search-keywords",
+      "name": "トリガーワード検索",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 400]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "options": {}
+      },
+      "id": "split",
+      "name": "ヒットを分割",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [860, 400]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "campaign_entries",
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            { "keyName": "campaign_id", "condition": "eq", "keyValue": "={{ $('無料特典キャンペーン取得').item.json.id }}" },
+            { "keyName": "author_id", "condition": "eq", "keyValue": "={{ $json.author_id }}" }
+          ]
+        }
+      },
+      "id": "dedupe",
+      "name": "既配布かチェック",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1080, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.length }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "equals" }
+            }
+          ]
+        }
+      },
+      "id": "is-new",
+      "name": "新規か？",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1300, 400]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.twitter.com/2/dm_conversations/with/{{ $('ヒットを分割').item.json.author_id }}/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "twitterOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"ご興味ありがとうございます！\\n\\n▼ 無料特典ダウンロード\\n{{ $('無料特典キャンペーン取得').item.json.config.download_url }}?ref={{ $('ヒットを分割').item.json.author_id }}&c={{ $('無料特典キャンペーン取得').item.json.id }}\\n\\n感想もらえると嬉しいです🙏\"\n}"
+      },
+      "id": "send-pdf",
+      "name": "特典DM送信",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1520, 320],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "tableId": "campaign_entries",
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "campaign_id", "fieldValue": "={{ $('無料特典キャンペーン取得').item.json.id }}" },
+            { "fieldId": "author_id", "fieldValue": "={{ $('ヒットを分割').item.json.author_id }}" },
+            { "fieldId": "source_type", "fieldValue": "dm_keyword" },
+            { "fieldId": "source_tweet_id", "fieldValue": "={{ $('ヒットを分割').item.json.id }}" }
+          ]
+        }
+      },
+      "id": "save-entry",
+      "name": "配布記録",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1740, 320]
+    }
+  ],
+  "connections": {
+    "5分毎": { "main": [[{ "node": "無料特典キャンペーン取得", "type": "main", "index": 0 }]] },
+    "無料特典キャンペーン取得": { "main": [[{ "node": "トリガーワード検索", "type": "main", "index": 0 }]] },
+    "トリガーワード検索": { "main": [[{ "node": "ヒットを分割", "type": "main", "index": 0 }]] },
+    "ヒットを分割": { "main": [[{ "node": "既配布かチェック", "type": "main", "index": 0 }]] },
+    "既配布かチェック": { "main": [[{ "node": "新規か？", "type": "main", "index": 0 }]] },
+    "新規か？": {
+      "main": [
+        [{ "node": "特典DM送信", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "特典DM送信": { "main": [[{ "node": "配布記録", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "campaign" }, { "name": "B-education" }]
+}

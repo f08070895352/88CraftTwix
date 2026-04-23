@@ -1,0 +1,101 @@
+{
+  "name": "C: Limited Offer Creator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "create-limited-offer",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "trigger",
+      "name": "POST /create-limited-offer",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 400],
+      "notes": "body: { campaign_id, hours: 48, discount_pct: 30, announce_text }"
+    },
+    {
+      "parameters": {
+        "url": "https://api.stripe.com/v1/coupons",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "stripeApi",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "percent_off", "value": "={{ $json.body.discount_pct }}" },
+            { "name": "duration", "value": "once" },
+            { "name": "redeem_by", "value": "={{ Math.floor(Date.now()/1000) + ($json.body.hours * 3600) }}" },
+            { "name": "max_redemptions", "value": "={{ $json.body.max_redemptions || 100 }}" },
+            { "name": "metadata[campaign_id]", "value": "={{ $json.body.campaign_id }}" }
+          ]
+        }
+      },
+      "id": "create-coupon",
+      "name": "Stripeクーポン作成",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 400]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "campaigns",
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            { "keyName": "id", "condition": "eq", "keyValue": "={{ $('POST /create-limited-offer').item.json.body.campaign_id }}" }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "starts_at", "fieldValue": "={{ $now.toISO() }}" },
+            { "fieldId": "ends_at", "fieldValue": "={{ $now.plus({hours: $('POST /create-limited-offer').item.json.body.hours}).toISO() }}" },
+            { "fieldId": "config", "fieldValue": "={ \"coupon_id\": \"{{ $json.id }}\", \"discount_pct\": {{ $('POST /create-limited-offer').item.json.body.discount_pct }}, \"hours\": {{ $('POST /create-limited-offer').item.json.body.hours }} }" }
+          ]
+        }
+      },
+      "id": "update-campaign",
+      "name": "キャンペーンに期限保存",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [640, 400]
+    },
+    {
+      "parameters": {
+        "url": "https://api.twitter.com/2/tweets",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "twitterOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": {{ JSON.stringify(($('POST /create-limited-offer').item.json.body.announce_text || '⏰ 限定オファー開始！') + '\\n\\n▼ 今すぐ' + $('POST /create-limited-offer').item.json.body.hours + '時間以内\\n' + $env.CHECKOUT_BASE_URL + '?c=' + $('POST /create-limited-offer').item.json.body.campaign_id + '&utm_source=x_limited') }}\n}"
+      },
+      "id": "announce-tweet",
+      "name": "告知ツイート",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"coupon_id\": \"{{ $('Stripeクーポン作成').item.json.id }}\", \"tweet_id\": \"{{ $json.data.id }}\", \"expires_at\": \"{{ $now.plus({hours: $('POST /create-limited-offer').item.json.body.hours}).toISO() }}\" }"
+      },
+      "id": "respond",
+      "name": "結果返却",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1080, 400]
+    }
+  ],
+  "connections": {
+    "POST /create-limited-offer": { "main": [[{ "node": "Stripeクーポン作成", "type": "main", "index": 0 }]] },
+    "Stripeクーポン作成": { "main": [[{ "node": "キャンペーンに期限保存", "type": "main", "index": 0 }]] },
+    "キャンペーンに期限保存": { "main": [[{ "node": "告知ツイート", "type": "main", "index": 0 }]] },
+    "告知ツイート": { "main": [[{ "node": "結果返却", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "campaign" }, { "name": "C-sales" }]
+}
