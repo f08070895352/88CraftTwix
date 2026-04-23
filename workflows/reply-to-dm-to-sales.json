@@ -124,10 +124,46 @@
         "assignments": {
           "assignments": [
             {
-              "id": "a1",
-              "name": "productContext",
-              "type": "object",
-              "value": "={\n  \"product\": {\n    \"name\": \"（ここに商品名を入れる）\",\n    \"one_liner\": \"（30字以内のキャッチコピー）\",\n    \"price_jpy\": 9800,\n    \"coupon_text\": \"24時間限定で20%OFF\",\n    \"key_benefits\": [\"（ベネフィット1）\", \"（ベネフィット2）\", \"（ベネフィット3）\"],\n    \"proof_points\": [\"（実績・レビュー・導入社数など）\"],\n    \"faq\": [\n      { \"q\": \"返金保証は？\", \"a\": \"購入後14日以内であれば全額返金します。\" },\n      { \"q\": \"対応デバイスは？\", \"a\": \"Web/iOS/Android 全対応です。\" }\n    ]\n  },\n  \"tone\": {\n    \"persona\": \"親しみやすい営業アシスタント。敬語。\",\n    \"emoji_per_reply\": 1,\n    \"forbidden\": [\"煽り\", \"断定的医療/投資助言\", \"他社比較の誹謗\"]\n  }\n}"
+              "id": "pc-name",
+              "name": "productName",
+              "type": "string",
+              "value": "（ここに商品名を入れる）"
+            },
+            {
+              "id": "pc-oneliner",
+              "name": "oneLiner",
+              "type": "string",
+              "value": "（30字以内のキャッチコピー）"
+            },
+            {
+              "id": "pc-price",
+              "name": "priceJpy",
+              "type": "number",
+              "value": 9800
+            },
+            {
+              "id": "pc-coupon",
+              "name": "couponText",
+              "type": "string",
+              "value": "24時間限定で20%OFF"
+            },
+            {
+              "id": "pc-benefits",
+              "name": "keyBenefits",
+              "type": "string",
+              "value": "1) ベネフィット1 / 2) ベネフィット2 / 3) ベネフィット3"
+            },
+            {
+              "id": "pc-faq",
+              "name": "faq",
+              "type": "string",
+              "value": "Q.返金保証は？ A.購入後14日以内であれば全額返金。\nQ.対応デバイスは？ A.Web/iOS/Android全対応。"
+            },
+            {
+              "id": "pc-tone",
+              "name": "toneRules",
+              "type": "string",
+              "value": "親しみやすい営業アシスタント。敬語。絵文字1個。煽り/医療投資助言/他社誹謗は禁止。"
             }
           ]
         },
@@ -138,7 +174,7 @@
       "type": "n8n-nodes-base.set",
       "typeVersion": 3.4,
       "position": [1180, 260],
-      "notes": "config/product-context.json の内容と同期させること。UIで編集可能。"
+      "notes": "config/product-context.json と同期。UIで編集可能。"
     },
     {
       "parameters": {
@@ -151,7 +187,7 @@
           "values": [
             {
               "role": "system",
-              "content": "=あなたは営業アシスタントです。以下の商品コンテキストを踏まえ、ユーザーのリプライを分析し JSON で返してください。\n\n## 商品コンテキスト\n{{ JSON.stringify($('商品コンテキスト').item.json.productContext, null, 2) }}\n\n## 出力フォーマット（必ずこのJSON形式）\n{\n  \"intent\": \"question|interest|spam|other\",\n  \"lead_score\": 0-100の整数,\n  \"reason\": \"根拠\",\n  \"suggested_reply\": \"返信文(140字以内、敬語、絵文字1つ、tone.forbidden に触れないこと)\"\n}\n\n## lead_score基準\n- 商品/価格/使い方への質問: 70-90\n- 感想・共感: 40-60\n- スパム・無関係: 0-20\n\n## 返信ルール\n- 商品名・価格・ベネフィットは productContext を根拠にすること（創作しない）\n- 質問がFAQに該当する場合は faq を要約して答える\n- tone.persona に沿った敬語・絵文字1個"
+              "content": "=あなたは営業アシスタントです。以下の商品コンテキストを踏まえ、ユーザーのリプライを分析し JSON で返してください。\n\n## 商品コンテキスト\n- 商品名: {{ $('商品コンテキスト').item.json.productName }}\n- キャッチ: {{ $('商品コンテキスト').item.json.oneLiner }}\n- 価格: ¥{{ $('商品コンテキスト').item.json.priceJpy }}\n- クーポン: {{ $('商品コンテキスト').item.json.couponText }}\n- ベネフィット: {{ $('商品コンテキスト').item.json.keyBenefits }}\n- FAQ:\n{{ $('商品コンテキスト').item.json.faq }}\n\n## トーン\n{{ $('商品コンテキスト').item.json.toneRules }}\n\n## 出力フォーマット（必ずこのJSON形式）\n{\n  \"intent\": \"question|interest|spam|other\",\n  \"lead_score\": 0-100の整数,\n  \"reason\": \"根拠\",\n  \"suggested_reply\": \"返信文(140字以内、敬語、絵文字1つ)\"\n}\n\n## lead_score基準\n- 商品/価格/使い方への質問: 70-90\n- 感想・共感: 40-60\n- スパム・無関係: 0-20\n\n## 返信ルール\n- 商品名・価格・ベネフィットは上記を根拠にすること（創作しない）\n- FAQに該当する質問はFAQを要約して答える\n- トーン規則に従う"
             },
             {
               "role": "user",
@@ -195,6 +231,72 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [1520, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.twitter.com/2/users/{{ $('リプライを分割').item.json.author_id }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "twitterOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "user.fields", "value": "protected,public_metrics,verified" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dm-feasibility",
+      "name": "DM可否プリチェック",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1960, 140],
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "not-protected",
+              "leftValue": "={{ $json.data?.protected === true }}",
+              "rightValue": false,
+              "operator": { "type": "boolean", "operation": "equals" }
+            },
+            {
+              "id": "has-followers",
+              "leftValue": "={{ $json.data?.public_metrics?.followers_count ?? 0 }}",
+              "rightValue": 3,
+              "operator": { "type": "number", "operation": "gte" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "can-receive-dm",
+      "name": "DM可能性あり？",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2070, 140]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "tableId": "processed_replies",
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "tweet_id", "fieldValue": "={{ $('リプライを分割').item.json.id }}" },
+            { "fieldId": "processed_at", "fieldValue": "={{ $now.toISO() }}" },
+            { "fieldId": "skipped_reason", "fieldValue": "dm_not_feasible" }
+          ]
+        }
+      },
+      "id": "mark-skipped-dm",
+      "name": "DM不可でスキップ記録",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [2070, 300]
     },
     {
       "parameters": {
@@ -247,12 +349,13 @@
     {
       "parameters": {
         "conditions": {
-          "options": { "typeValidation": "strict" },
+          "options": { "typeValidation": "loose" },
           "conditions": [
             {
-              "leftValue": "={{ $json.data && $json.data.dm_conversation_id ? true : false }}",
-              "rightValue": true,
-              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+              "id": "dm-ok",
+              "leftValue": "={{ $json.data?.dm_conversation_id || '' }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
             }
           ],
           "combinator": "and"
@@ -648,7 +751,16 @@
       "main": [[{ "node": "30秒待機", "type": "main", "index": 0 }]]
     },
     "30秒待機": {
-      "main": [[{ "node": "DM送信（特典LP付き）", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "DM可否プリチェック", "type": "main", "index": 0 }]]
+    },
+    "DM可否プリチェック": {
+      "main": [[{ "node": "DM可能性あり？", "type": "main", "index": 0 }]]
+    },
+    "DM可能性あり？": {
+      "main": [
+        [{ "node": "DM送信（特典LP付き）", "type": "main", "index": 0 }],
+        [{ "node": "DM不可でスキップ記録", "type": "main", "index": 0 }]
+      ]
     },
     "DM送信（特典LP付き）": {
       "main": [[{ "node": "DM送信成功か？", "type": "main", "index": 0 }]]
@@ -661,6 +773,9 @@
     },
     "DM失敗を記録": {
       "main": [[{ "node": "DM失敗をSlackへ", "type": "main", "index": 0 }]]
+    },
+    "DM失敗をSlackへ": {
+      "main": [[{ "node": "処理済みマーク", "type": "main", "index": 0 }]]
     },
     "リード保存 (Supabase)": {
       "main": [[{ "node": "処理済みマーク", "type": "main", "index": 0 }]]

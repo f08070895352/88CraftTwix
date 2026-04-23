@@ -141,6 +141,32 @@ Checkout Session 作成時に `client_reference_id` に X の `author_id` を必
 copy known_followers (follower_id, dm_sent) from '/path/to/followers.csv' csv;
 ```
 
+## 本番投入前のチェックリスト
+
+以下は1度走らせるだけで済む運用前ハードニング:
+
+1. **ワークフローJSONの正規化** — n8n でインポートしないと typeVersion や parameter shape にズレがあるかどうか最終確認できない。ローカルに n8n を入れて:
+   ```bash
+   ./scripts/normalize-workflows.sh
+   git diff workflows/
+   ```
+   差分が出たらそれが n8n 公式の形。commit して上書き。
+2. **静的リント** — CI に入れて壊れたJSONを早期検知:
+   ```bash
+   node ./scripts/lint-workflows.mjs
+   ```
+3. **X API pilot** — 本番トークンでレート・DM成否を実測:
+   ```bash
+   X_USER_ID=... X_USER_TOKEN=... ./scripts/pilot-x-api.sh
+   ```
+   手順は `docs/pilot-runbook.md` 参照。
+4. **Supabase RLS** — schema.sql を流した後に必ず:
+   ```bash
+   psql "$SUPABASE_DB_URL" -v n8n_writer_password="$(openssl rand -hex 24)" \
+     -f supabase/rls.sql
+   ```
+   n8n のクレデンシャルには `service_role` ではなく `n8n_writer` の JWT を設定する。
+
 ## 運用上の注意
 
 - X APIのDM送信は **相手が受信可能設定** でないと弾かれます。429/403はリトライキューへ。
