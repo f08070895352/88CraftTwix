@@ -1,0 +1,201 @@
+{
+  "name": "04_Hypothesis_to_Engaging_Post",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "仮説からポスト生成",
+        "formDescription": "「これなら伸びそう」という仮説を入れてください。AIが裏付けを集め、あなたのアカウントの世界観に合わせてポストを生成します。",
+        "formFields": {
+          "values": [
+            {"fieldLabel": "hypothesis", "fieldType": "textarea", "placeholder": "例: 副業初心者は『月1万円』より『通勤中の30分でできる』の方が刺さる", "requiredField": true},
+            {"fieldLabel": "category", "fieldType": "dropdown", "fieldOptions": {"values": [{"option": "副業ノウハウ"}, {"option": "マインド"}, {"option": "ツール紹介"}, {"option": "失敗談"}, {"option": "その他"}]}, "requiredField": true},
+            {"fieldLabel": "variants", "fieldType": "number", "placeholder": "生成する案の数（1〜3）", "requiredField": true},
+            {"fieldLabel": "dry_run", "fieldType": "dropdown", "fieldOptions": {"values": [{"option": "true"}, {"option": "false"}]}, "requiredField": true}
+          ]
+        }
+      },
+      "id": "c4a11111-1111-1111-1111-111111111111",
+      "name": "Submit Hypothesis",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "sheetName": "={{$env.GSHEET_PERSONA_ID}}",
+        "options": {"returnAllMatches": false}
+      },
+      "id": "c4a22222-2222-2222-2222-222222222222",
+      "name": "Load Account Persona",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [420, 300],
+      "credentials": {"googleSheetsOAuth2Api": {"id": "GSHEETS_CRED", "name": "Google Sheets OAuth"}}
+    },
+    {
+      "parameters": {
+        "functionCode": "const form = $('Submit Hypothesis').item.json;\nconst persona = $json;\nreturn [{ json: {\n  hypothesis: form.hypothesis,\n  category: form.category,\n  variants: Math.max(1, Math.min(3, Number(form.variants) || 1)),\n  dry_run: String(form.dry_run) === 'true',\n  persona: {\n    handle: persona.handle || '',\n    worldview: persona.worldview || '',\n    tone: persona.tone || 'フレンドリーで断定的、絵文字は控えめ',\n    target: persona.target || '副業を始めたい20-30代の会社員',\n    ng_words: persona.ng_words || '',\n    voice_samples: persona.voice_samples || ''\n  }\n}}];"
+      },
+      "id": "c4a33333-3333-3333-3333-333333333333",
+      "name": "Compose Context",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "modelId": {"__rl": true, "mode": "list", "value": "claude-sonnet-4-6"},
+        "messages": {
+          "values": [
+            {
+              "role": "user",
+              "content": "=あなたはXグロース戦略のリサーチャーです。以下の仮説について、ポストで使える『裏付け・反証・意外な切り口』を構造化して返してください。誇張や断言できない数値は避け、一般に広く知られた知見に留めてください。\n\n仮説: {{$json[\"hypothesis\"]}}\nカテゴリ: {{$json[\"category\"]}}\n想定読者: {{$json[\"persona\"][\"target\"]}}\n\n以下のJSONだけを返してください。前置きや ```json は不要です。\n{\n  \"verdict\": \"likely_true | partially_true | likely_false\",\n  \"key_claims\": [\"...\", \"...\"],\n  \"supporting_points\": [\"根拠1\", \"根拠2\", \"根拠3\"],\n  \"counter_points\": [\"反証や注意点\"],\n  \"surprising_angles\": [\"意外性のある切り口1\", \"切り口2\"],\n  \"hook_ideas\": [\"冒頭フック案1\", \"フック案2\", \"フック案3\"]\n}"
+            }
+          ]
+        },
+        "options": {"maxTokensToSample": 1200, "temperature": 0.4}
+      },
+      "id": "c4a44444-4444-4444-4444-444444444444",
+      "name": "Claude Research",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [860, 300],
+      "credentials": {"anthropicApi": {"id": "ANTHROPIC_CRED", "name": "Anthropic API"}}
+    },
+    {
+      "parameters": {
+        "functionCode": "const raw = ($json.content && $json.content[0] && $json.content[0].text) || $json.text || '{}';\nlet research = {};\ntry {\n  const match = raw.match(/\\{[\\s\\S]*\\}/);\n  research = JSON.parse(match ? match[0] : raw);\n} catch (e) {\n  research = { verdict: 'unknown', raw };\n}\nreturn [{ json: { ...$('Compose Context').item.json, research } }];"
+      },
+      "id": "c4a55555-5555-5555-5555-555555555555",
+      "name": "Parse Research",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1080, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "modelId": {"__rl": true, "mode": "list", "value": "claude-sonnet-4-6"},
+        "messages": {
+          "values": [
+            {
+              "role": "user",
+              "content": "=あなたは以下のアカウントの運用担当です。仮説とリサーチ結果をもとに、エンゲージメントが伸びやすいXポストを {{$json[\"variants\"]}} 案、日本語で作ってください。\n\n【アカウント世界観】\n{{$json[\"persona\"][\"worldview\"]}}\n\n【トーン】\n{{$json[\"persona\"][\"tone\"]}}\n\n【ターゲット】\n{{$json[\"persona\"][\"target\"]}}\n\n【NGワード / 避ける表現】\n{{$json[\"persona\"][\"ng_words\"]}}\n\n【過去の人気ポスト例（トーン参考）】\n{{$json[\"persona\"][\"voice_samples\"]}}\n\n【仮説】\n{{$json[\"hypothesis\"]}}\n\n【リサーチ結果(JSON)】\n{{JSON.stringify($json[\"research\"])}}\n\n制約:\n- 1案あたり140文字以内（改行含む）\n- 冒頭1行で止めさせる強いフック（数字・逆張り・問い）\n- 最後に軽いCTA（保存したくなる要約 or 共感を促す問いかけ）\n- ハッシュタグは付けない、URLも付けない\n- 絵文字は0〜2個\n- 誇張・断定しすぎる表現は避け、根拠が薄い数字は書かない\n\n次のJSONだけを返してください（前置きなし）:\n{\n  \"posts\": [\n    {\"hook\": \"...\", \"text\": \"投稿本文（140字以内）\", \"reason\": \"なぜ伸びるか一言\"}\n  ]\n}"
+            }
+          ]
+        },
+        "options": {"maxTokensToSample": 1200, "temperature": 0.9}
+      },
+      "id": "c4a66666-6666-6666-6666-666666666666",
+      "name": "Claude Craft Posts",
+      "type": "@n8n/n8n-nodes-langchain.anthropic",
+      "typeVersion": 1,
+      "position": [1300, 300],
+      "credentials": {"anthropicApi": {"id": "ANTHROPIC_CRED", "name": "Anthropic API"}}
+    },
+    {
+      "parameters": {
+        "functionCode": "const raw = ($json.content && $json.content[0] && $json.content[0].text) || $json.text || '{}';\nlet parsed = { posts: [] };\ntry {\n  const match = raw.match(/\\{[\\s\\S]*\\}/);\n  parsed = JSON.parse(match ? match[0] : raw);\n} catch (e) {}\nconst ctx = $('Parse Research').item.json;\nconst out = (parsed.posts || []).map((p, idx) => ({ json: {\n  hypothesis: ctx.hypothesis,\n  category: ctx.category,\n  dry_run: ctx.dry_run,\n  variant_index: idx + 1,\n  hook: p.hook || '',\n  text: (p.text || '').slice(0, 140),\n  reason: p.reason || '',\n  research: ctx.research\n}}));\nreturn out.length ? out : [{ json: { error: 'no posts generated', raw } }];"
+      },
+      "id": "c4a77777-7777-7777-7777-777777777777",
+      "name": "Split Variants",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1520, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {"leftValue": "={{$json[\"dry_run\"]}}", "rightValue": false, "operator": {"type": "boolean", "operation": "equals"}},
+            {"leftValue": "={{$json[\"variant_index\"]}}", "rightValue": 1, "operator": {"type": "number", "operation": "equals"}}
+          ]
+        }
+      },
+      "id": "c4a88888-8888-8888-8888-888888888888",
+      "name": "Post Variant 1?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1740, 300]
+    },
+    {
+      "parameters": {
+        "resource": "tweet",
+        "text": "={{$json[\"text\"]}}"
+      },
+      "id": "c4a99999-9999-9999-9999-999999999999",
+      "name": "Post to X",
+      "type": "n8n-nodes-base.twitter",
+      "typeVersion": 2,
+      "position": [1960, 220],
+      "credentials": {"twitterOAuth2Api": {"id": "TWITTER_CRED", "name": "X/Twitter OAuth2"}}
+    },
+    {
+      "parameters": {
+        "functionCode": "const ctx = $('Split Variants').item.json;\nconst tweet = $json || {};\nreturn [{ json: { ...ctx, tweet_id: tweet.id || '', posted: true, posted_at: new Date().toISOString() } }];"
+      },
+      "id": "c4aaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "name": "Attach Tweet ID",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2180, 220]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "sheetName": "={{$env.GSHEET_POSTS_ID}}",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "created_at": "={{$now.toISO()}}",
+            "category": "={{$json[\"category\"]}}",
+            "hypothesis": "={{$json[\"hypothesis\"]}}",
+            "variant_index": "={{$json[\"variant_index\"]}}",
+            "hook": "={{$json[\"hook\"]}}",
+            "post_text": "={{$json[\"text\"]}}",
+            "reason": "={{$json[\"reason\"]}}",
+            "research_json": "={{JSON.stringify($json[\"research\"])}}",
+            "posted": "={{$json[\"posted\"] || false}}",
+            "tweet_id": "={{$json[\"tweet_id\"] || ''}}",
+            "posted_at": "={{$json[\"posted_at\"] || ''}}"
+          }
+        }
+      },
+      "id": "c4abbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      "name": "Save to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [2400, 300],
+      "credentials": {"googleSheetsOAuth2Api": {"id": "GSHEETS_CRED", "name": "Google Sheets OAuth"}}
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { status: 'ok', variants: $json } }}"
+      },
+      "id": "c4acccccc-cccc-cccc-cccc-cccccccccccc",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2620, 300]
+    }
+  ],
+  "connections": {
+    "Submit Hypothesis": {"main": [[{"node": "Load Account Persona", "type": "main", "index": 0}]]},
+    "Load Account Persona": {"main": [[{"node": "Compose Context", "type": "main", "index": 0}]]},
+    "Compose Context": {"main": [[{"node": "Claude Research", "type": "main", "index": 0}]]},
+    "Claude Research": {"main": [[{"node": "Parse Research", "type": "main", "index": 0}]]},
+    "Parse Research": {"main": [[{"node": "Claude Craft Posts", "type": "main", "index": 0}]]},
+    "Claude Craft Posts": {"main": [[{"node": "Split Variants", "type": "main", "index": 0}]]},
+    "Split Variants": {"main": [[{"node": "Post Variant 1?", "type": "main", "index": 0}]]},
+    "Post Variant 1?": {"main": [[{"node": "Post to X", "type": "main", "index": 0}], [{"node": "Save to Sheets", "type": "main", "index": 0}]]},
+    "Post to X": {"main": [[{"node": "Attach Tweet ID", "type": "main", "index": 0}]]},
+    "Attach Tweet ID": {"main": [[{"node": "Save to Sheets", "type": "main", "index": 0}]]},
+    "Save to Sheets": {"main": [[{"node": "Respond", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"},
+  "tags": [{"name": "hypothesis"}, {"name": "ai"}, {"name": "post-generation"}]
+}
