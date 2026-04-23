@@ -98,6 +98,7 @@ Checkout Session 作成時に `client_reference_id` に X の `author_id` を必
 | `workflows/stripe-checkout-session-creator.json` | `GET /checkout?ref=<author_id>` を受けて Stripe Checkout Session を作り 302 リダイレクト |
 | `workflows/error-handler.json` | Error Trigger → Slack 通報 + `error_log` テーブルへ保存（各ワークフローの **Settings → Error Workflow** でこれを指定） |
 | `workflows/daily-kpi-report.json` | 毎朝9時に直近24hの DM数 / CVR / 売上 / 平均リードスコアを Slack 投稿 |
+| `workflows/new-follower-welcome-dm.json` | 15分ごとに `/users/:id/followers` を取得 → `known_followers` テーブルと差分検知 → 新規のみBot除外フィルタ後にウェルカムDM送信 |
 
 ## テスト素材
 
@@ -114,6 +115,23 @@ Checkout Session 作成時に `client_reference_id` に X の `author_id` を必
 - **AIモデル**: `AI分類・返信生成` を `gpt-4o` や Claude へ差し替え可
 - **DM本文 / フォロー回数**: それぞれのHTTPノード `jsonBody` を編集
 - **プラットフォーム拡張**: X部分を Instagram / TikTok に差し替えても同じ骨格で動きます
+
+## 新規フォロワーDMの初回ブートストラップ
+
+`new-follower-welcome-dm.json` は「`known_followers` に居ない人 = 新規」として扱います。
+**初回アクティベート前に、既存フォロワー全員をテーブルへ流し込んでおく**ことで、古いフォロワーへの誤DMを防げます。
+
+```bash
+# 1. ワークフローを一時的に "ウェルカムDM送信" と "Slack通知" ノードだけ無効化してから Execute Workflow
+# 2. 1回の実行で known_followers に全件入るので、ノードを再度有効化して Activate
+```
+
+もしくは SQL で直接シード:
+
+```sql
+-- 既存フォロワーIDをCSVで用意して一括INSERT
+copy known_followers (follower_id, dm_sent) from '/path/to/followers.csv' csv;
+```
 
 ## 運用上の注意
 

@@ -1,0 +1,236 @@
+{
+  "name": "New Follower → Welcome DM",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "minutes", "minutesInterval": 15 }
+          ]
+        }
+      },
+      "id": "cron-15m",
+      "name": "15分ごとに実行",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 400]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.twitter.com/2/users/{{$env.X_USER_ID}}/followers",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "twitterOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "max_results", "value": "200" },
+            { "name": "user.fields", "value": "username,name,description,created_at,public_metrics,verified,protected" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fetch-followers",
+      "name": "フォロワー一覧取得",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 400]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "options": {}
+      },
+      "id": "split-followers",
+      "name": "フォロワーを分割",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [640, 400]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "known_followers",
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "follower_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        }
+      },
+      "id": "check-known",
+      "name": "既知かチェック",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [860, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "typeValidation": "strict" },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.length }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "is-new",
+      "name": "新規フォロワーか？",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1080, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "typeValidation": "strict" },
+          "conditions": [
+            {
+              "leftValue": "={{ $('フォロワーを分割').item.json.protected }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "notEqual" }
+            },
+            {
+              "leftValue": "={{ $('フォロワーを分割').item.json.public_metrics.followers_count }}",
+              "rightValue": 5,
+              "operator": { "type": "number", "operation": "gte" }
+            },
+            {
+              "leftValue": "={{ ($('フォロワーを分割').item.json.description || '').toLowerCase() }}",
+              "rightValue": "crypto airdrop",
+              "operator": { "type": "string", "operation": "notContains" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "not-bot",
+      "name": "Bot除外フィルタ",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1300, 320]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.twitter.com/2/dm_conversations/with/{{ $('フォロワーを分割').item.json.id }}/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "twitterOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"{{ $('フォロワーを分割').item.json.name }}さん、フォローありがとうございます🎉\\n\\nお役に立てそうな限定情報をまとめました。よかったらチェックしてみてください👇\\n\\n{{ $env.WELCOME_LP_URL }}?ref={{ $('フォロワーを分割').item.json.id }}&utm_source=x_follow_dm\\n\\n何かあればこのDMで気軽にお声がけください！\"\n}",
+        "options": {}
+      },
+      "id": "welcome-dm",
+      "name": "ウェルカムDM送信",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1520, 240]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "tableId": "known_followers",
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "follower_id", "fieldValue": "={{ $('フォロワーを分割').item.json.id }}" },
+            { "fieldId": "username", "fieldValue": "={{ $('フォロワーを分割').item.json.username }}" },
+            { "fieldId": "name", "fieldValue": "={{ $('フォロワーを分割').item.json.name }}" },
+            { "fieldId": "description", "fieldValue": "={{ $('フォロワーを分割').item.json.description }}" },
+            { "fieldId": "followers_count", "fieldValue": "={{ $('フォロワーを分割').item.json.public_metrics.followers_count }}" },
+            { "fieldId": "verified", "fieldValue": "={{ $('フォロワーを分割').item.json.verified }}" },
+            { "fieldId": "dm_sent", "fieldValue": true },
+            { "fieldId": "first_seen_at", "fieldValue": "={{ $now.toISO() }}" }
+          ]
+        }
+      },
+      "id": "save-dmed",
+      "name": "DM送信済みで保存",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1740, 240]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "tableId": "known_followers",
+        "fieldsUi": {
+          "fieldValues": [
+            { "fieldId": "follower_id", "fieldValue": "={{ $('フォロワーを分割').item.json.id }}" },
+            { "fieldId": "username", "fieldValue": "={{ $('フォロワーを分割').item.json.username }}" },
+            { "fieldId": "name", "fieldValue": "={{ $('フォロワーを分割').item.json.name }}" },
+            { "fieldId": "description", "fieldValue": "={{ $('フォロワーを分割').item.json.description }}" },
+            { "fieldId": "followers_count", "fieldValue": "={{ $('フォロワーを分割').item.json.public_metrics.followers_count }}" },
+            { "fieldId": "verified", "fieldValue": "={{ $('フォロワーを分割').item.json.verified }}" },
+            { "fieldId": "dm_sent", "fieldValue": false },
+            { "fieldId": "skipped_reason", "fieldValue": "bot_filter" },
+            { "fieldId": "first_seen_at", "fieldValue": "={{ $now.toISO() }}" }
+          ]
+        }
+      },
+      "id": "save-skipped",
+      "name": "スキップで保存",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1520, 440]
+    },
+    {
+      "parameters": {
+        "channel": "#sales-alerts",
+        "text": "=🆕 新規フォロワー: *@{{ $('フォロワーを分割').item.json.username }}* ({{ $('フォロワーを分割').item.json.public_metrics.followers_count }}フォロワー)\nウェルカムDM送信済 ✅"
+      },
+      "id": "notify",
+      "name": "Slack通知",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [1960, 240]
+    }
+  ],
+  "connections": {
+    "15分ごとに実行": {
+      "main": [[{ "node": "フォロワー一覧取得", "type": "main", "index": 0 }]]
+    },
+    "フォロワー一覧取得": {
+      "main": [[{ "node": "フォロワーを分割", "type": "main", "index": 0 }]]
+    },
+    "フォロワーを分割": {
+      "main": [[{ "node": "既知かチェック", "type": "main", "index": 0 }]]
+    },
+    "既知かチェック": {
+      "main": [[{ "node": "新規フォロワーか？", "type": "main", "index": 0 }]]
+    },
+    "新規フォロワーか？": {
+      "main": [
+        [{ "node": "Bot除外フィルタ", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Bot除外フィルタ": {
+      "main": [
+        [{ "node": "ウェルカムDM送信", "type": "main", "index": 0 }],
+        [{ "node": "スキップで保存", "type": "main", "index": 0 }]
+      ]
+    },
+    "ウェルカムDM送信": {
+      "main": [[{ "node": "DM送信済みで保存", "type": "main", "index": 0 }]]
+    },
+    "DM送信済みで保存": {
+      "main": [[{ "node": "Slack通知", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    { "name": "x-twitter" },
+    { "name": "automation" },
+    { "name": "followers" }
+  ]
+}

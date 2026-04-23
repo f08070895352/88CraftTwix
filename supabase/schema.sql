@@ -42,3 +42,19 @@ create table if not exists error_log (
 );
 
 create index if not exists idx_error_log_created on error_log (created_at desc);
+
+create table if not exists known_followers (
+  id bigserial primary key,
+  follower_id text not null unique,
+  username text,
+  name text,
+  description text,
+  followers_count int,
+  verified boolean default false,
+  dm_sent boolean not null default false,
+  skipped_reason text,
+  first_seen_at timestamptz not null default now()
+);
+
+create index if not exists idx_known_followers_follower_id on known_followers (follower_id);
+create index if not exists idx_known_followers_first_seen on known_followers (first_seen_at desc);
