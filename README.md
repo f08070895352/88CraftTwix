@@ -1,0 +1,105 @@
+# n8n 完全自動化: リプ → DM → 販売
+
+X (旧Twitter) への**リプライ取得 → AI分類 → 自動リプ → DM送信 → 購入トラッキング → フォローアップ**までを
+n8n 1本のワークフローで回すためのテンプレートです。
+
+## 全体フロー
+
+```
+[5分ごとCron]
+    ↓
+リプライ取得 (X API v2 /mentions)
+    ↓
+Supabaseで重複除外
+    ↓
+OpenAI で intent 判定 & lead_score 付与 & 返信文生成
+    ↓
+スコア >= 40 なら ──┐
+    ↓              │
+自動リプライ投稿    │
+    ↓              │
+30秒待機 → DM送信（特典LP付き）
+    ↓
+leads テーブルに保存 (stage=dm_sent)
+    ↓
+Slack通知
+
+[Stripe Webhook]
+    ↓
+checkout.session.completed を受信
+    ↓
+leads を stage=purchased に更新 + お礼DM
+
+[24hごとCron]
+    ↓
+stage=dm_sent かつ 24h経過 & followup_count<2 のリードへ
+    ↓
+フォローアップDM (クーポンLP)
+```
+
+## セットアップ
+
+### 1. n8n を用意
+
+- セルフホスト: `docker run -it --rm -p 5678:5678 n8nio/n8n`
+- または n8n Cloud
+
+### 2. 依存サービスの準備
+
+| サービス | 役割 | 必要なスコープ／キー |
+|---|---|---|
+| X Developer | リプ監視 / 自動リプ / DM送信 | OAuth2 ユーザ認証で `tweet.read tweet.write users.read dm.read dm.write offline.access` |
+| OpenAI | インテント分類 & 返信生成 | API Key (gpt-4o-mini想定) |
+| Supabase | リード & 重複テーブル | Project URL + Service Role Key |
+| Stripe | 決済Webhook | `checkout.session.completed` を n8n の Webhook URL へ |
+| Slack | 営業通知 | Bot Token (`chat:write`) |
+
+### 3. Supabase スキーマを流す
+
+```bash
+psql "$SUPABASE_DB_URL" -f supabase/schema.sql
+```
+
+### 4. n8n Credentials を登録
+
+n8n UI の **Credentials** に次を作成:
+
+- `Twitter OAuth2 API` → 上記スコープでOAuth完了させる
+- `Supabase API` → URL + Service Role Key
+- `OpenAI API` → OPENAI_API_KEY
+- `Slack API` → Bot Token
+
+### 5. 環境変数を設定
+
+n8n の **Settings → Environment Variables** または `.env` に:
+
+```bash
+X_USER_ID=1234567890
+CHECKOUT_BASE_URL=https://example.com/checkout
+```
+
+### 6. ワークフローをインポート
+
+`workflows/reply-to-dm-to-sales.json` を n8n の **Workflows → Import from File** で取り込み、
+各ノードの Credentials を選択し **Activate** を押す。
+
+### 7. Stripe Webhook を接続
+
+n8n 側で有効化された `/webhook/stripe-checkout-completed` の URL を Stripe Dashboard → Developers → Webhooks に登録。イベントは `checkout.session.completed` を選択。
+
+Checkout Session 作成時に `client_reference_id` に X の `author_id` を必ず入れること
+（これでリードとの紐付けが行われます）。
+
+## カスタマイズポイント
+
+- **lead_score のしきい値**: `見込み客判定` ノードで `>= 40` を変更
+- **AIモデル**: `AI分類・返信生成` を `gpt-4o` や Claude へ差し替え可
+- **DM本文 / フォロー回数**: それぞれのHTTPノード `jsonBody` を編集
+- **プラットフォーム拡張**: X部分を Instagram / TikTok に差し替えても同じ骨格で動きます
+
+## 運用上の注意
+
+- X APIのDM送信は **相手が受信可能設定** でないと弾かれます。429/403はリトライキューへ。
+- X APIのレート制限に合わせて Cron 間隔は5分以上を推奨。
+- 自動リプは規約違反にならない頻度・内容に必ず調整してください。
+- `processed_replies` は `tweet_id` UNIQUE なので、冪等性が保たれます。

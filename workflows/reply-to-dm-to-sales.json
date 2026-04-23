@@ -1,0 +1,605 @@
+{
+  "name": "Reply → DM → Sales Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "5分ごとに実行",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 400]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.twitter.com/2/users/{{$env.X_USER_ID}}/mentions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "twitterOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "max_results",
+              "value": "50"
+            },
+            {
+              "name": "tweet.fields",
+              "value": "author_id,created_at,conversation_id,in_reply_to_user_id,referenced_tweets,text"
+            },
+            {
+              "name": "expansions",
+              "value": "author_id"
+            },
+            {
+              "name": "user.fields",
+              "value": "username,public_metrics,verified"
+            },
+            {
+              "name": "start_time",
+              "value": "={{ $now.minus({minutes: 10}).toISO() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fetch-mentions",
+      "name": "リプライ取得 (X API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [420, 400]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "data",
+        "options": {
+          "includeAllFields": false
+        }
+      },
+      "id": "split-mentions",
+      "name": "リプライを分割",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [640, 400]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "tableId": "processed_replies",
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "tweet_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.id }}"
+            }
+          ]
+        }
+      },
+      "id": "check-dedupe",
+      "name": "重複チェック (Supabase)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [860, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "is-new-reply",
+      "name": "新規リプライか？",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1080, 400]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "modelId": {
+          "value": "gpt-4o-mini"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "あなたは営業アシスタントです。ユーザーのリプライを分析し、以下のJSONで返してください:\n{\n  \"intent\": \"question|interest|spam|other\",\n  \"lead_score\": 0-100の整数,\n  \"reason\": \"根拠\",\n  \"suggested_reply\": \"返信文(140字以内、敬語、絵文字1つ)\"\n}\nlead_score基準:\n- 商品/価格/使い方への質問: 70-90\n- 感想・共感: 40-60\n- スパム・無関係: 0-20"
+            },
+            {
+              "role": "user",
+              "content": "={{ $('リプライを分割').item.json.text }}"
+            }
+          ]
+        },
+        "jsonOutput": true,
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "ai-classify",
+      "name": "AI分類・返信生成",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.6,
+      "position": [1300, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.message.content.lead_score }}",
+              "rightValue": 40,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "qualify-lead",
+      "name": "見込み客判定 (>=40)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1520, 300]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.twitter.com/2/tweets",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "twitterOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": {{ JSON.stringify($json.message.content.suggested_reply) }},\n  \"reply\": { \"in_reply_to_tweet_id\": {{ JSON.stringify($('リプライを分割').item.json.id) }} }\n}",
+        "options": {}
+      },
+      "id": "post-reply",
+      "name": "自動リプライ投稿",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1740, 200]
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "wait-dm",
+      "name": "30秒待機",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1960, 200]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.twitter.com/2/dm_conversations/with/{{ $('リプライを分割').item.json.author_id }}/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "twitterOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"リプライありがとうございます🙏\\n\\n詳しくご紹介したいので限定特典をお送りします。\\n\\n▼ 商品詳細＆限定クーポン(24h有効)\\n{{ $env.CHECKOUT_BASE_URL }}?ref={{ $('リプライを分割').item.json.author_id }}&utm_source=x_dm\\n\\nご不明点はこちらにそのままご返信ください！\"\n}",
+        "options": {}
+      },
+      "id": "send-dm",
+      "name": "DM送信（特典LP付き）",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2180, 200]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "tableId": "leads",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "author_id",
+              "fieldValue": "={{ $('リプライを分割').item.json.author_id }}"
+            },
+            {
+              "fieldId": "tweet_id",
+              "fieldValue": "={{ $('リプライを分割').item.json.id }}"
+            },
+            {
+              "fieldId": "lead_score",
+              "fieldValue": "={{ $('AI分類・返信生成').item.json.message.content.lead_score }}"
+            },
+            {
+              "fieldId": "intent",
+              "fieldValue": "={{ $('AI分類・返信生成').item.json.message.content.intent }}"
+            },
+            {
+              "fieldId": "stage",
+              "fieldValue": "dm_sent"
+            },
+            {
+              "fieldId": "source_text",
+              "fieldValue": "={{ $('リプライを分割').item.json.text }}"
+            },
+            {
+              "fieldId": "created_at",
+              "fieldValue": "={{ $now.toISO() }}"
+            }
+          ]
+        }
+      },
+      "id": "save-lead",
+      "name": "リード保存 (Supabase)",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [2400, 200]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "tableId": "processed_replies",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "tweet_id",
+              "fieldValue": "={{ $('リプライを分割').item.json.id }}"
+            },
+            {
+              "fieldId": "processed_at",
+              "fieldValue": "={{ $now.toISO() }}"
+            }
+          ]
+        }
+      },
+      "id": "mark-processed",
+      "name": "処理済みマーク",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [2620, 200]
+    },
+    {
+      "parameters": {
+        "channel": "#sales-alerts",
+        "text": "=🎯 新しい見込み客（スコア{{ $('AI分類・返信生成').item.json.message.content.lead_score }}）\nテキスト: {{ $('リプライを分割').item.json.text }}\nDM送信済み ✅"
+      },
+      "id": "slack-notify",
+      "name": "Slack通知",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [2840, 200]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "tableId": "processed_replies",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "tweet_id",
+              "fieldValue": "={{ $('リプライを分割').item.json.id }}"
+            },
+            {
+              "fieldId": "processed_at",
+              "fieldValue": "={{ $now.toISO() }}"
+            },
+            {
+              "fieldId": "skipped_reason",
+              "fieldValue": "low_score_or_spam"
+            }
+          ]
+        }
+      },
+      "id": "mark-skipped",
+      "name": "スキップ記録",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1740, 420]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "stripe-checkout-completed",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "stripe-webhook",
+      "name": "Stripe Webhook受信",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 900]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "leftValue": "={{ $json.body.type }}",
+              "rightValue": "checkout.session.completed",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "is-checkout-completed",
+      "name": "購入完了イベントか",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [420, 900]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "leads",
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "author_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.body.data.object.client_reference_id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "stage",
+              "fieldValue": "purchased"
+            },
+            {
+              "fieldId": "amount",
+              "fieldValue": "={{ $json.body.data.object.amount_total / 100 }}"
+            },
+            {
+              "fieldId": "purchased_at",
+              "fieldValue": "={{ $now.toISO() }}"
+            }
+          ]
+        }
+      },
+      "id": "mark-purchased",
+      "name": "購入済みに更新",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [640, 820]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.twitter.com/2/dm_conversations/with/{{ $('Stripe Webhook受信').item.json.body.data.object.client_reference_id }}/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "twitterOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"ご購入ありがとうございます🎉\\n\\n商品のお届け/アクセス方法はご登録メールに送信しました。\\n\\nご質問があればこのDMにてお気軽にどうぞ！\"\n}"
+      },
+      "id": "thankyou-dm",
+      "name": "購入者へお礼DM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [860, 820]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "ok"
+      },
+      "id": "webhook-response",
+      "name": "Webhook応答",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1080, 900]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24
+            }
+          ]
+        }
+      },
+      "id": "followup-cron",
+      "name": "24h毎フォローアップ",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 1200]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "leads",
+        "returnAll": true,
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "stage",
+              "condition": "eq",
+              "keyValue": "dm_sent"
+            },
+            {
+              "keyName": "created_at",
+              "condition": "lt",
+              "keyValue": "={{ $now.minus({hours: 24}).toISO() }}"
+            },
+            {
+              "keyName": "followup_count",
+              "condition": "lt",
+              "keyValue": "2"
+            }
+          ]
+        }
+      },
+      "id": "get-stale-leads",
+      "name": "未購入リード取得",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [420, 1200]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.twitter.com/2/dm_conversations/with/{{ $json.author_id }}/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "twitterOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"先日はリプありがとうございました！\\n\\n期間限定クーポン、残り時間わずかです⏰\\n\\n▼ こちらから\\n{{ $env.CHECKOUT_BASE_URL }}?ref={{ $json.author_id }}&utm_source=x_followup\\n\\nご不明点があればこのDMで！\"\n}"
+      },
+      "id": "followup-dm",
+      "name": "フォローアップDM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 1200]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "leads",
+        "filterType": "manual",
+        "matchType": "allFilters",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "author_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.author_id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "followup_count",
+              "fieldValue": "={{ ($json.followup_count || 0) + 1 }}"
+            },
+            {
+              "fieldId": "last_followup_at",
+              "fieldValue": "={{ $now.toISO() }}"
+            }
+          ]
+        }
+      },
+      "id": "increment-followup",
+      "name": "フォローアップ回数++",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [860, 1200]
+    }
+  ],
+  "connections": {
+    "5分ごとに実行": {
+      "main": [[{ "node": "リプライ取得 (X API)", "type": "main", "index": 0 }]]
+    },
+    "リプライ取得 (X API)": {
+      "main": [[{ "node": "リプライを分割", "type": "main", "index": 0 }]]
+    },
+    "リプライを分割": {
+      "main": [[{ "node": "重複チェック (Supabase)", "type": "main", "index": 0 }]]
+    },
+    "重複チェック (Supabase)": {
+      "main": [[{ "node": "新規リプライか？", "type": "main", "index": 0 }]]
+    },
+    "新規リプライか？": {
+      "main": [
+        [{ "node": "AI分類・返信生成", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "AI分類・返信生成": {
+      "main": [[{ "node": "見込み客判定 (>=40)", "type": "main", "index": 0 }]]
+    },
+    "見込み客判定 (>=40)": {
+      "main": [
+        [{ "node": "自動リプライ投稿", "type": "main", "index": 0 }],
+        [{ "node": "スキップ記録", "type": "main", "index": 0 }]
+      ]
+    },
+    "自動リプライ投稿": {
+      "main": [[{ "node": "30秒待機", "type": "main", "index": 0 }]]
+    },
+    "30秒待機": {
+      "main": [[{ "node": "DM送信（特典LP付き）", "type": "main", "index": 0 }]]
+    },
+    "DM送信（特典LP付き）": {
+      "main": [[{ "node": "リード保存 (Supabase)", "type": "main", "index": 0 }]]
+    },
+    "リード保存 (Supabase)": {
+      "main": [[{ "node": "処理済みマーク", "type": "main", "index": 0 }]]
+    },
+    "処理済みマーク": {
+      "main": [[{ "node": "Slack通知", "type": "main", "index": 0 }]]
+    },
+    "Stripe Webhook受信": {
+      "main": [[{ "node": "購入完了イベントか", "type": "main", "index": 0 }]]
+    },
+    "購入完了イベントか": {
+      "main": [
+        [
+          { "node": "購入済みに更新", "type": "main", "index": 0 },
+          { "node": "Webhook応答", "type": "main", "index": 0 }
+        ],
+        [{ "node": "Webhook応答", "type": "main", "index": 0 }]
+      ]
+    },
+    "購入済みに更新": {
+      "main": [[{ "node": "購入者へお礼DM", "type": "main", "index": 0 }]]
+    },
+    "24h毎フォローアップ": {
+      "main": [[{ "node": "未購入リード取得", "type": "main", "index": 0 }]]
+    },
+    "未購入リード取得": {
+      "main": [[{ "node": "フォローアップDM", "type": "main", "index": 0 }]]
+    },
+    "フォローアップDM": {
+      "main": [[{ "node": "フォローアップ回数++", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "tags": [
+    { "name": "sales" },
+    { "name": "x-twitter" },
+    { "name": "automation" }
+  ],
+  "pinData": {},
+  "versionId": "1.0.0"
+}
