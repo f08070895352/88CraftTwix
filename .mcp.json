@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "utage-api": {
+      "url": "https://api.utage-system.com/mcp"
+    }
+  }
+}
